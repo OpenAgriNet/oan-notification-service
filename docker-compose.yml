@@ -1,0 +1,36 @@
+services:
+  app:
+    image: oan-notification-service:latest
+    container_name: oan-notification-service
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+    ports:
+      - "${PORT:-3000}:3000"
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Allows the container to reach PostgreSQL running on the host machine.
+    # On Linux, host.docker.internal is not available by default — this adds it.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  redis:
+    image: redis/redis-stack:latest
+    container_name: oan-redis
+    ports:
+      - "6379:6379"   # Redis
+      - "8001:8001"   # RedisInsight UI
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:
