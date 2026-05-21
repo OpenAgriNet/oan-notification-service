@@ -1,53 +1,6 @@
 # OAN Notification Service
 
 A NestJS microservice that delivers geo-targeted agricultural advisories to farmers. Given a GPS coordinate and language preference, it resolves the subdistrict via PostGIS, fetches the current week's IITM advisories, and returns structured notifications.
-
----
-
-## Architecture
-
-```mermaid
-flowchart TD
-    Client(["Client\n(Browser / Mobile)"])
-
-    subgraph API["NestJS API — port 8081"]
-        Pipe["ValidationPipe\n(DTO validation)"]
-        Interceptor["LoggingInterceptor\n(request / response logs)"]
-        Controller["NotificationsController\nPOST /api/notification"]
-        Service["NotificationsService"]
-        Filter["AllExceptionsFilter\n(global error handler)"]
-    end
-
-    subgraph DB["PostgreSQL + PostGIS"]
-        Subdistricts[("subdistricts\n(geometry, iitm_id)")]
-        Advisories[("advisory_notifications\n(unique_id_iitm, lang_abb,\nfrom_date, to_date)")]
-    end
-
-    Redis[("Redis\n(seen message cache)")]
-
-    Client -->|"POST { visitor_id, lat, lon, lang }"| Pipe
-    Pipe -->|valid| Interceptor
-    Interceptor --> Controller
-    Controller --> Service
-
-    Service -->|"ST_Intersects(geom, point)\n→ iitm_id"| Subdistricts
-    Subdistricts -->|iitm_id| Service
-
-    Service -->|"visitor_id + seen_message_ids\n→ validate exclusions"| Redis
-    Redis -->|validated exclude list| Service
-
-    Service -->|"WHERE unique_id_iitm = iitm_id\nAND LOWER(lang_abb) = LOWER(lang)\nAND date range = current week\nORDER BY created_at DESC"| Advisories
-    Advisories -->|advisory rows| Service
-
-    Service -->|"cache served notification IDs"| Redis
-    Service -->|structured response| Controller
-    Controller -->|JSON| Client
-
-    Pipe -->|validation error 400| Filter
-    Service -->|unhandled exception| Filter
-    Filter -->|error JSON| Client
-```
-
 ---
 
 ## Request / Response Flow
