@@ -12,6 +12,8 @@ export const validationSchema = Joi.object({
 
   LOG_LEVEL: Joi.string().valid('fatal', 'error', 'warn', 'info', 'debug', 'trace').default('debug'),
 
+  NOTIFICATION_RADIUS_KM: Joi.number().min(0).default(0),
+
   REDIS_HOST: Joi.string().default('localhost'),
   REDIS_PORT: Joi.number().default(6379),
 });

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
@@ -27,11 +28,14 @@ interface AdvisoryRow {
   lang_abb: string;
   forecast_message: string | null;
   template_abbreviation: string | null;
-  lat: string | null;
-  lon: string | null;
   from_date: string;
   to_date: string;
   created_at: Date;
+}
+
+interface SubdistrictMatch {
+  iitm_id: string;
+  distance_meters: number;
 }
 
 export interface NotificationItem {
@@ -58,6 +62,7 @@ export class NotificationsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly redisService: RedisService,
+    private readonly configService: ConfigService,
     @InjectPinoLogger(NotificationsService.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -65,6 +70,7 @@ export class NotificationsService {
   async getNearestNotifications(dto: GetAdvisoryDto) {
     const week = this.getCurrentWeek();
     const visitorId = dto.visitor_id ?? null;
+    const radiusKm = this.getNotificationRadiusKm();
 
     // Validate client-supplied seen IDs against Redis — only exclude IDs we
     // actually served to this visitor, preventing arbitrary exclusion.
@@ -81,29 +87,27 @@ export class NotificationsService {
     }
 
     this.logger.debug(
-      { lat: dto.lat, lon: dto.lon, lang: dto.lang, week, excludeIds },
-      'Fetching nearest notifications',
+      { lat: dto.lat, lon: dto.lon, lang: dto.lang, week, excludeIds, radiusKm },
+      '[STEP 0] Request received',
     );
 
     try {
-      // Step 1: resolve subdistrict + iitm_id from lat/lon
-      const subdistrict: { iitm_id: string }[] = await this.dataSource.query(
-        `
-        SELECT iitm_id::text
-        FROM subdistricts
-        WHERE ST_Intersects(
-          geom,
-          ST_Transform(ST_SetSRID(ST_MakePoint($1, $2), 4326), 3857)
-        )
-        LIMIT 1
-        `,
-        [dto.lon, dto.lat],
+      // Step 1: resolve subdistrict(s) + iitm_id(s) from lat/lon
+      this.logger.debug(
+        { lon: dto.lon, lat: dto.lat, radiusKm },
+        '[STEP 1] Querying subdistricts for lat/lon',
       );
 
-      if (!subdistrict.length) {
-        this.logger.debug(
-          { lat: dto.lat, lon: dto.lon },
-          'No subdistrict found for coordinates',
+      const subdistricts = await this.findMatchingSubdistricts(
+        dto.lon,
+        dto.lat,
+        radiusKm,
+      );
+
+      if (!subdistricts.length) {
+        this.logger.warn(
+          { lat: dto.lat, lon: dto.lon, radiusKm },
+          '[STEP 1] FAILED — no subdistrict polygon found for coordinates',
         );
         return {
           success: true,
@@ -119,10 +123,25 @@ export class NotificationsService {
         };
       }
 
-      const iitmId = subdistrict[0].iitm_id;
-      this.logger.debug({ iitmId }, 'Resolved iitm_id from subdistrict');
+      const iitmIds = subdistricts.map((subdistrict) => subdistrict.iitm_id);
+      this.logger.debug(
+        { iitmIds, radiusKm, subdistrictsFound: subdistricts.length },
+        '[STEP 1] SUCCESS — subdistrict iitm_ids resolved',
+      );
 
-      // Step 2: fetch advisories by iitm_id + lang (case-insensitive) + date range
+      // Step 2: fetch advisories by iitm_id(s) + lang + date range
+      this.logger.debug(
+        {
+          iitmIds,
+          lang: dto.lang,
+          weekStart: week.start,
+          weekEnd: week.end,
+          excludeIds,
+          radiusKm,
+        },
+        '[STEP 2] Querying advisory_notifications',
+      );
+
       const rows: AdvisoryRow[] = await this.dataSource.query(
         `
         SELECT
@@ -138,28 +157,31 @@ export class NotificationsService {
           lang_abb,
           forecast_message,
           template_abbreviation,
-          lat,
-          lon,
           from_date,
           to_date,
           created_at
         FROM advisory_notifications
         WHERE
-          unique_id_iitm = $1
+          unique_id_iitm::text = ANY($1::text[])
           AND LOWER(lang_abb) = LOWER($2)
           AND from_date      <= $3::date
           AND to_date        >= $4::date
           AND ($5::uuid[] IS NULL OR message_id != ALL($5::uuid[]))
-        ORDER BY created_at DESC
+        ORDER BY array_position($1::text[], unique_id_iitm::text), created_at DESC
         LIMIT 5
         `,
         [
-          iitmId,
+          iitmIds,
           dto.lang,
           week.end,
           week.start,
           excludeIds.length ? excludeIds : null,
         ],
+      );
+
+      this.logger.debug(
+        { iitmIds, rowsFound: rows.length, langs: rows.map(r => r.lang_abb) },
+        '[STEP 2] advisory_notifications result',
       );
 
       const notifications = rows.map((row) => this.toNotificationItem(row));
@@ -205,6 +227,55 @@ export class NotificationsService {
   }
 
   // ─── private helpers ────────────────────────────────────────────────────────
+
+  private async findMatchingSubdistricts(
+    lon: number,
+    lat: number,
+    radiusKm: number,
+  ): Promise<SubdistrictMatch[]> {
+    const pointSql = 'ST_Transform(ST_SetSRID(ST_MakePoint($1, $2), 4326), 3857)';
+
+    if (radiusKm <= 0) {
+      return this.dataSource.query(
+        `
+        SELECT iitm_id::text, 0::double precision AS distance_meters
+        FROM subdistricts
+        WHERE ST_Intersects(
+          geom,
+          ${pointSql}
+        )
+        LIMIT 1
+        `,
+        [lon, lat],
+      );
+    }
+
+    return this.dataSource.query(
+      `
+      WITH request_point AS (
+        SELECT ${pointSql} AS geom
+      ),
+      matches AS (
+        SELECT DISTINCT ON (s.iitm_id)
+          s.iitm_id::text,
+          ST_Distance(s.geom, p.geom) AS distance_meters
+        FROM subdistricts s
+        CROSS JOIN request_point p
+        WHERE ST_DWithin(s.geom, p.geom, $3)
+        ORDER BY s.iitm_id, distance_meters ASC
+      )
+      SELECT iitm_id, distance_meters
+      FROM matches
+      ORDER BY distance_meters ASC
+      `,
+      [lon, lat, radiusKm * 1000],
+    );
+  }
+
+  private getNotificationRadiusKm(): number {
+    const radiusKm = this.configService.get<number>('app.notificationRadiusKm', 0);
+    return Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : 0;
+  }
 
   private toNotificationItem(row: AdvisoryRow): NotificationItem {
     const type            = classifyNotification(row.template_abbreviation);

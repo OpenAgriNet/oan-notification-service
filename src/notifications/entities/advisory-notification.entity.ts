@@ -50,16 +50,6 @@ export class AdvisoryNotification {
   @Column({ name: 'template_abbreviation', type: 'varchar', length: 50, nullable: true })
   templateAbbreviation: string | null;
 
-  @Column({ name: 'lat', type: 'numeric', precision: 10, scale: 7, nullable: true })
-  lat: number | null;
-
-  @Column({ name: 'lon', type: 'numeric', precision: 10, scale: 7, nullable: true })
-  lon: number | null;
-
-  // geom column is managed by the DB trigger — excluded from ORM writes
-  @Column({ name: 'geom', type: 'geometry', nullable: true, select: false })
-  geom: unknown;
-
   @Index()
   @Column({ name: 'from_date', type: 'date' })
   fromDate: string;
