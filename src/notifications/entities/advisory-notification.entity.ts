@@ -12,10 +12,6 @@ export class AdvisoryNotification {
   messageId: string;
 
   @Index()
-  @Column({ name: 'unique_id_pm_kisan', type: 'integer' })
-  uniqueIdPmKisan: number;
-
-  @Index()
   @Column({ name: 'unique_id_iitm', type: 'bigint' })
   uniqueIdIitm: string;
 

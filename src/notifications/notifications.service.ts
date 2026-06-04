@@ -10,14 +10,8 @@ import { classifyNotification } from './utils/notification-type.classifier';
 import { derivePriority } from './utils/priority.classifier';
 import { RedisService } from '../redis/redis.service';
 
-interface WeekRange {
-  start: string;
-  end: string;
-}
-
 interface AdvisoryRow {
   message_id: string;
-  unique_id_pm_kisan: number;
   unique_id_iitm: string;
   subdistrict_code: number;
   subdistrict_name: string | null;
@@ -36,6 +30,7 @@ interface AdvisoryRow {
 interface SubdistrictMatch {
   iitm_id: string;
   distance_meters: number;
+  distance_km: number;
 }
 
 export interface NotificationItem {
@@ -68,26 +63,11 @@ export class NotificationsService {
   ) {}
 
   async getNearestNotifications(dto: GetAdvisoryDto) {
-    const week = this.getCurrentWeek();
     const visitorId = dto.visitor_id ?? null;
     const radiusKm = this.getNotificationRadiusKm();
 
-    // Validate client-supplied seen IDs against Redis — only exclude IDs we
-    // actually served to this visitor, preventing arbitrary exclusion.
-    let excludeIds: string[] = [];
-    if (visitorId && dto.seen_message_ids?.length) {
-      excludeIds = await this.redisService.validateSeenMessages(
-        visitorId,
-        dto.seen_message_ids,
-      );
-      this.logger.debug(
-        { visitorId, requested: dto.seen_message_ids.length, validated: excludeIds.length },
-        'Validated seen message IDs',
-      );
-    }
-
     this.logger.debug(
-      { lat: dto.lat, lon: dto.lon, lang: dto.lang, week, excludeIds, radiusKm },
+      { lat: dto.lat, lon: dto.lon, lang: dto.lang, radiusKm },
       '[STEP 0] Request received',
     );
 
@@ -131,14 +111,7 @@ export class NotificationsService {
 
       // Step 2: fetch advisories by iitm_id(s) + lang + date range
       this.logger.debug(
-        {
-          iitmIds,
-          lang: dto.lang,
-          weekStart: week.start,
-          weekEnd: week.end,
-          excludeIds,
-          radiusKm,
-        },
+        { iitmIds, lang: dto.lang, radiusKm },
         '[STEP 2] Querying advisory_notifications',
       );
 
@@ -146,7 +119,6 @@ export class NotificationsService {
         `
         SELECT
           message_id,
-          unique_id_pm_kisan,
           unique_id_iitm,
           subdistrict_code,
           subdistrict_name,
@@ -164,19 +136,12 @@ export class NotificationsService {
         WHERE
           unique_id_iitm::text = ANY($1::text[])
           AND LOWER(lang_abb) = LOWER($2)
-          AND from_date      <= $3::date
-          AND to_date        >= $4::date
-          AND ($5::uuid[] IS NULL OR message_id != ALL($5::uuid[]))
+          AND from_date <= CURRENT_DATE
+          AND to_date   >= CURRENT_DATE
         ORDER BY array_position($1::text[], unique_id_iitm::text), created_at DESC
-        LIMIT 5
+        LIMIT 2
         `,
-        [
-          iitmIds,
-          dto.lang,
-          week.end,
-          week.start,
-          excludeIds.length ? excludeIds : null,
-        ],
+        [iitmIds, dto.lang],
       );
 
       this.logger.debug(
@@ -186,7 +151,6 @@ export class NotificationsService {
 
       const notifications = rows.map((row) => this.toNotificationItem(row));
 
-      // Cache the IDs we just served so future requests can validate seen IDs
       if (visitorId && notifications.length) {
         await this.redisService.addLoadedMessages(
           visitorId,
@@ -235,21 +199,6 @@ export class NotificationsService {
   ): Promise<SubdistrictMatch[]> {
     const pointSql = 'ST_Transform(ST_SetSRID(ST_MakePoint($1, $2), 4326), 3857)';
 
-    if (radiusKm <= 0) {
-      return this.dataSource.query(
-        `
-        SELECT iitm_id::text, 0::double precision AS distance_meters
-        FROM subdistricts
-        WHERE ST_Intersects(
-          geom,
-          ${pointSql}
-        )
-        LIMIT 1
-        `,
-        [lon, lat],
-      );
-    }
-
     return this.dataSource.query(
       `
       WITH request_point AS (
@@ -264,7 +213,7 @@ export class NotificationsService {
         WHERE ST_DWithin(s.geom, p.geom, $3)
         ORDER BY s.iitm_id, distance_meters ASC
       )
-      SELECT iitm_id, distance_meters
+      SELECT iitm_id, distance_meters, ROUND((distance_meters / 1000)::numeric, 2) AS distance_km
       FROM matches
       ORDER BY distance_meters ASC
       `,
@@ -273,8 +222,8 @@ export class NotificationsService {
   }
 
   private getNotificationRadiusKm(): number {
-    const radiusKm = this.configService.get<number>('app.notificationRadiusKm', 0);
-    return Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : 0;
+    const radiusKm = this.configService.get<number>('app.notificationRadiusKm', 2);
+    return Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : 2;
   }
 
   private toNotificationItem(row: AdvisoryRow): NotificationItem {
@@ -304,7 +253,6 @@ export class NotificationsService {
         source:             'IITM',
         template:           row.template_abbreviation,
         unique_id_iitm:     row.unique_id_iitm,
-        unique_id_pm_kisan: row.unique_id_pm_kisan,
       },
     };
   }
@@ -317,15 +265,4 @@ export class NotificationsService {
     return 'General Notification';
   }
 
-  private getCurrentWeek(): WeekRange {
-    const today    = new Date();
-    const sunday   = new Date(today);
-    sunday.setDate(today.getDate() - today.getDay());
-    const saturday = new Date(sunday);
-    saturday.setDate(sunday.getDate() + 6);
-    return {
-      start: sunday.toISOString().slice(0, 10),
-      end:   saturday.toISOString().slice(0, 10),
-    };
-  }
 }

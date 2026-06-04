@@ -24,7 +24,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: process.env.CORS_ORIGINS
-      ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim())
+      ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim().replace(/\/$/, ''))
       : true,
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
