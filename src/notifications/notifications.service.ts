@@ -49,6 +49,16 @@ interface AdvisoryRow {
   created_at: Date;
 }
 
+interface GenericMessageRow {
+  message_id: string;
+  message_type: string;
+  message: string;
+  lang_abb: string;
+  from_date: string;
+  to_date: string;
+  created_at: Date;
+}
+
 interface SubdistrictMatch {
   iitm_id: string;
   distance_meters: number;
@@ -93,84 +103,52 @@ export class NotificationsService {
     );
 
     try {
-      // Step 1: resolve subdistrict(s) + iitm_id(s) from lat/lon
       this.logger.debug(
-        { lon: dto.lon, lat: dto.lat, radiusKm },
-        '[STEP 1] Querying subdistricts for lat/lon',
+        { lon: dto.lon, lat: dto.lat, radiusKm, lang: dto.lang },
+        '[STEP 1] Querying subdistricts and generic_messages in parallel',
       );
 
-      const subdistricts = await this.findMatchingSubdistricts(
-        dto.lon,
-        dto.lat,
-        radiusKm,
-      );
+      const [subdistricts, genericRows] = await Promise.all([
+        this.findMatchingSubdistricts(dto.lon, dto.lat, radiusKm),
+        this.fetchActiveGenericMessages(dto.lang),
+      ]);
+
+      let weatherRows: AdvisoryRow[] = [];
 
       if (!subdistricts.length) {
         this.logger.warn(
           { lat: dto.lat, lon: dto.lon, radiusKm },
-          '[STEP 1] FAILED — no subdistrict polygon found for coordinates',
+          '[STEP 1] No subdistrict polygon found — skipping weather advisories',
         );
-        return {
-          success: true,
-          recipient: {
-            visitor_id: visitorId,
-            lang_code:  dto.lang.toLowerCase(),
-            lat:        dto.lat,
-            lon:        dto.lon,
-          },
-          count:         0,
-          notifications: [],
-          error:         null,
-        };
+      } else {
+        const iitmIds = subdistricts.map((subdistrict) => subdistrict.iitm_id);
+        this.logger.debug(
+          { iitmIds, radiusKm, subdistrictsFound: subdistricts.length },
+          '[STEP 1] Subdistrict iitm_ids resolved',
+        );
+
+        this.logger.debug(
+          { iitmIds, lang: dto.lang, radiusKm },
+          '[STEP 2] Querying advisory_notifications',
+        );
+
+        weatherRows = await this.fetchActiveWeatherAdvisories(iitmIds, dto.lang);
+
+        this.logger.debug(
+          { iitmIds, rowsFound: weatherRows.length, langs: weatherRows.map((r) => r.lang_abb) },
+          '[STEP 2] advisory_notifications result',
+        );
       }
 
-      const iitmIds = subdistricts.map((subdistrict) => subdistrict.iitm_id);
       this.logger.debug(
-        { iitmIds, radiusKm, subdistrictsFound: subdistricts.length },
-        '[STEP 1] SUCCESS — subdistrict iitm_ids resolved',
+        { rowsFound: genericRows.length, lang: dto.lang },
+        '[STEP 3] generic_messages result',
       );
 
-      // Step 2: fetch advisories by iitm_id(s) + lang + date range
-      this.logger.debug(
-        { iitmIds, lang: dto.lang, radiusKm },
-        '[STEP 2] Querying advisory_notifications',
-      );
-
-      const rows: AdvisoryRow[] = await this.dataSource.query(
-        `
-        SELECT
-          message_id,
-          unique_id_iitm,
-          subdistrict_code,
-          subdistrict_name,
-          district_code,
-          district_name,
-          state_code,
-          state_name,
-          lang_abb,
-          forecast_message,
-          template_abbreviation,
-          from_date,
-          to_date,
-          created_at
-        FROM advisory_notifications
-        WHERE
-          unique_id_iitm::text = ANY($1::text[])
-          AND LOWER(lang_abb) = LOWER($2)
-          AND from_date <= CURRENT_DATE
-          AND to_date   >= CURRENT_DATE
-        ORDER BY array_position($1::text[], unique_id_iitm::text), created_at DESC
-        LIMIT 2
-        `,
-        [iitmIds, dto.lang],
-      );
-
-      this.logger.debug(
-        { iitmIds, rowsFound: rows.length, langs: rows.map(r => r.lang_abb) },
-        '[STEP 2] advisory_notifications result',
-      );
-
-      const notifications = rows.map((row) => this.toNotificationItem(row));
+      const notifications = [
+        ...weatherRows.map((row) => this.toNotificationItem(row)),
+        ...genericRows.map((row) => this.toGenericNotificationItem(row)),
+      ];
 
       return {
         success: true,
@@ -374,6 +352,72 @@ export class NotificationsService {
 
   // ─── private helpers ────────────────────────────────────────────────────────
 
+  private async fetchActiveWeatherAdvisories(
+    iitmIds: string[],
+    lang: string,
+  ): Promise<AdvisoryRow[]> {
+    return this.dataSource.query(
+      `
+      SELECT
+        message_id,
+        unique_id_iitm,
+        subdistrict_code,
+        subdistrict_name,
+        district_code,
+        district_name,
+        state_code,
+        state_name,
+        lang_abb,
+        forecast_message,
+        template_abbreviation,
+        from_date,
+        to_date,
+        created_at
+      FROM advisory_notifications
+      WHERE
+        unique_id_iitm::text = ANY($1::text[])
+        AND LOWER(TRIM(lang_abb)) = LOWER($2)
+        AND from_date <= CURRENT_DATE
+        AND to_date   >= CURRENT_DATE
+      ORDER BY array_position($1::text[], unique_id_iitm::text), created_at DESC
+      LIMIT 2
+      `,
+      [iitmIds, lang],
+    );
+  }
+
+  private async fetchActiveGenericMessages(lang: string): Promise<GenericMessageRow[]> {
+    return this.dataSource.query(
+      `
+      SELECT
+        message_id,
+        message_type,
+        message,
+        lang_abb,
+        from_date,
+        to_date,
+        created_at
+      FROM generic_messages
+      WHERE
+        LOWER(TRIM(lang_abb)) = ANY($1::text[])
+        AND from_date <= CURRENT_DATE
+        AND to_date   >= CURRENT_DATE
+      ORDER BY created_at DESC
+      `,
+      [this.resolveLangAbbVariants(lang)],
+    );
+  }
+
+  private resolveLangAbbVariants(lang: string): string[] {
+    const normalized = lang.toLowerCase().trim();
+    const aliases: Record<string, string[]> = {
+      en: ['en', 'eng'],
+      hi: ['hi', 'hin'],
+    };
+
+    return aliases[normalized] ?? [normalized];
+  }
+
   private async findMatchingSubdistricts(
     lon: number,
     lat: number,
@@ -406,6 +450,25 @@ export class NotificationsService {
   private getNotificationRadiusKm(): number {
     const radiusKm = this.configService.get<number>('app.notificationRadiusKm', 2);
     return Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : 2;
+  }
+
+  private toGenericNotificationItem(row: GenericMessageRow): NotificationItem {
+    return {
+      notification_id: row.message_id,
+      type:            NotificationType.GENERAL,
+      priority:        Priority.LOW,
+      valid_from:      row.from_date,
+      valid_to:        row.to_date,
+      created_at:      new Date(row.created_at).toISOString(),
+      content: {
+        title: 'General Notification',
+        body:  row.message,
+      },
+      location: null,
+      metadata: {
+        message_type: row.message_type,
+      },
+    };
   }
 
   private toNotificationItem(row: AdvisoryRow): NotificationItem {
