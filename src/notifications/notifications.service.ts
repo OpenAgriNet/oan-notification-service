@@ -44,6 +44,8 @@ interface AdvisoryRow {
   lang_abb: string;
   forecast_message: string | null;
   template_abbreviation: string | null;
+  message_type: string | null;
+  category_type: string | null;
   from_date: string;
   to_date: string;
   created_at: Date;
@@ -52,6 +54,7 @@ interface AdvisoryRow {
 interface GenericMessageRow {
   message_id: string;
   message_type: string;
+  category_type: string | null;
   message: string;
   lang_abb: string;
   from_date: string;
@@ -68,6 +71,8 @@ interface SubdistrictMatch {
 export interface NotificationItem {
   notification_id: string;
   type: NotificationType;
+  message_type: string | null;
+  category_type: string | null;
   priority: Priority;
   valid_from: string;
   valid_to: string;
@@ -370,6 +375,8 @@ export class NotificationsService {
         lang_abb,
         forecast_message,
         template_abbreviation,
+        message_type,
+        category_type,
         from_date,
         to_date,
         created_at
@@ -392,6 +399,7 @@ export class NotificationsService {
       SELECT
         message_id,
         message_type,
+        category_type,
         message,
         lang_abb,
         from_date,
@@ -456,6 +464,8 @@ export class NotificationsService {
     return {
       notification_id: row.message_id,
       type:            NotificationType.GENERAL,
+      message_type:    row.message_type,
+      category_type:   row.category_type,
       priority:        Priority.LOW,
       valid_from:      row.from_date,
       valid_to:        row.to_date,
@@ -479,6 +489,8 @@ export class NotificationsService {
     return {
       notification_id: row.message_id,
       type,
+      message_type: row.message_type,
+      category_type: row.category_type,
       priority,
       valid_from:  row.from_date,
       valid_to:    row.to_date,
