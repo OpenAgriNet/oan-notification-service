@@ -14,6 +14,9 @@ export class GenericMessage {
   @Column({ name: 'message_type', type: 'varchar', length: 50, default: 'generic' })
   messageType: string;
 
+  @Column({ name: 'category_type', type: 'varchar', length: 50, nullable: true })
+  categoryType: string | null;
+
   @Column({ name: 'message', type: 'text' })
   message: string;
 
