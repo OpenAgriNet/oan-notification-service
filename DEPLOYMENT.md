@@ -58,10 +58,7 @@ docker compose up -d
 ```bash
 docker compose ps
 docker compose logs -f app
-curl http://localhost:3000/health
 ```
-
-Replace `3000` with the `PORT` value from your `.env` if different.
 
 ## Environment
 

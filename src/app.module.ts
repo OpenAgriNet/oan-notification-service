@@ -5,7 +5,6 @@ import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 import { validationSchema } from './config/validation.schema';
 import { DatabaseModule } from './database/database.module';
-import { HealthModule } from './health/health.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
@@ -39,7 +38,6 @@ import { AppService } from './app.service';
       }),
     }),
     DatabaseModule,
-    HealthModule,
     NotificationsModule,
   ],
   controllers: [AppController],
