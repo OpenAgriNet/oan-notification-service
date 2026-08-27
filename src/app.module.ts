@@ -3,11 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
-import redisConfig from './config/redis.config';
 import { validationSchema } from './config/validation.schema';
 import { DatabaseModule } from './database/database.module';
-import { RedisModule } from './redis/redis.module';
-import { HealthModule } from './health/health.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
@@ -18,7 +15,7 @@ import { AppService } from './app.service';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, redisConfig],
+      load: [appConfig, databaseConfig],
       validationSchema,
       validationOptions: { abortEarly: false },
     }),
@@ -41,8 +38,6 @@ import { AppService } from './app.service';
       }),
     }),
     DatabaseModule,
-    RedisModule,
-    HealthModule,
     NotificationsModule,
   ],
   controllers: [AppController],

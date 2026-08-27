@@ -90,12 +90,6 @@ A NestJS microservice that delivers geo-targeted agricultural advisories to farm
 
 ---
 
-### `GET /api/health`
-
-Returns database connectivity, system memory, CPU, disk, and ORM status.
-
----
-
 ## Environment Variables
 
 Copy `.env.example` to `.env` and fill in your values.

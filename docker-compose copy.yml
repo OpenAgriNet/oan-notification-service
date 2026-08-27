@@ -17,7 +17,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       CORS_ORIGINS: http://localhost:3001
-      NOTIFICATION_RADIUS_KM: 50
+      NOTIFICATION_RADIUS_KM: 1
       LOG_LEVEL: debug
     ports:
       - "8082:8082"

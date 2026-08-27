@@ -46,6 +46,12 @@ export class AdvisoryNotification {
   @Column({ name: 'template_abbreviation', type: 'varchar', length: 50, nullable: true })
   templateAbbreviation: string | null;
 
+  @Column({ name: 'message_type', type: 'varchar', length: 50, nullable: true })
+  messageType: string | null;
+
+  @Column({ name: 'category_type', type: 'varchar', length: 50, nullable: true })
+  categoryType: string | null;
+
   @Index()
   @Column({ name: 'from_date', type: 'date' })
   fromDate: string;
