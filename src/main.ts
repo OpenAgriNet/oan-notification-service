@@ -6,7 +6,10 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { globalValidationPipe } from './common/pipes/validation.pipe';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
 
   // Use Pino as the NestJS logger
   app.useLogger(app.get(Logger));

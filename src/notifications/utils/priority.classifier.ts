@@ -7,6 +7,7 @@ import { Priority } from '../enums/priority.enum';
 const TYPE_PRIORITY: Record<NotificationType, Priority> = {
   [NotificationType.WEATHER_ADVISORY]: Priority.HIGH,
   [NotificationType.GENERAL]:          Priority.LOW,
+  [NotificationType.AGROMET_ADVISORY]: Priority.HIGH,
 };
 
 export function derivePriority(type: NotificationType): Priority {

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { ImdAgrometService } from './imd-agromet.service';
 import { parse as parseCsv } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import { GetAdvisoryDto } from './dto/get-advisory.dto';
@@ -96,6 +97,7 @@ export class NotificationsService {
     private readonly configService: ConfigService,
     @InjectPinoLogger(NotificationsService.name)
     private readonly logger: PinoLogger,
+    private readonly imdAgromet: ImdAgrometService,
   ) {}
 
   async getNearestNotifications(dto: GetAdvisoryDto) {
@@ -113,9 +115,10 @@ export class NotificationsService {
         '[STEP 1] Querying subdistricts and generic_messages in parallel',
       );
 
-      const [subdistricts, genericRows] = await Promise.all([
+      const [subdistricts, genericRows, imdItems] = await Promise.all([
         this.findMatchingSubdistricts(dto.lon, dto.lat, radiusKm),
         this.fetchActiveGenericMessages(dto.lang),
+        this.imdAgromet.getNotifications(dto.lat, dto.lon, dto.lang), // never throws
       ]);
 
       let weatherRows: AdvisoryRow[] = [];
@@ -152,6 +155,7 @@ export class NotificationsService {
 
       const notifications = [
         ...weatherRows.map((row) => this.toNotificationItem(row)),
+        ...imdItems,
         ...genericRows.map((row) => this.toGenericNotificationItem(row)),
       ];
 
