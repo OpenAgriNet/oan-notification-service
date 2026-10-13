@@ -1,16 +1,36 @@
 import {
-  Body, Controller, Get, HttpCode, Post, Query,
+  Body, Controller, Get, Headers, HttpCode, Post, Query, Req,
   UploadedFile, UseInterceptors,
 } from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
+import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { NotificationsService } from './notifications.service';
+import { ImdAgrometService } from './imd-agromet.service';
 import { GetAdvisoryDto } from './dto/get-advisory.dto';
 import { GetAllAdvisoryDto } from './dto/get-all-advisory.dto';
 
 @Controller('notification')
 export class NotificationsController {
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly imdAgromet: ImdAgrometService,
+  ) {}
+
+  /**
+   * POST /api/notification/resolver/on_resolve
+   * Location Resolver callback.
+   */
+  @Post('resolver/on_resolve')
+  @HttpCode(200)
+  resolverOnResolve(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers('x-resolver-timestamp') timestamp?: string,
+    @Headers('x-resolver-signature') signature?: string,
+  ) {
+    return this.imdAgromet.onResolve(req.rawBody, timestamp, signature);
+  }
 
   /**
    * POST /api/notification
