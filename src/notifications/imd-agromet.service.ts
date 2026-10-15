@@ -28,6 +28,7 @@ interface LookupRow {
 interface LookupResponse {
   districts: { lgd_district_code: number; name: string | null }[];
   date: string | null;
+  valid_until: string | null;
   advisories: LookupRow[];
 }
 
@@ -38,8 +39,17 @@ const WEATHER_RE = /\b(rain|rainfall|temperature)/i;
 const MAX_TOPICS = 6;
 const POINT_RADIUS_KM = 0.1;
 const POINT_CACHE_MS = 30 * 24 * 3600 * 1000;
-const BULLETIN_VALID_DAYS = 3;
 const SIGNATURE_MAX_AGE_S = 300;
+
+/** "2026-10-15" -> "15 Oct 2026" */
+function displayDate(isoDate: string): string {
+  return new Date(`${isoDate}T00:00:00Z`).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
 
 /** Same bulletin + district -> same UUID v4-shaped id (the UI sends seen ids back; the DTO requires UUID v4). */
 function stableUuid(seed: string): string {
@@ -237,7 +247,7 @@ export class ImdAgrometService {
 
   private toItem(data: LookupResponse, lang: string): NotificationItem | null {
     const rows = data.advisories ?? [];
-    if (!rows.length || !data.date) return null;
+    if (!rows.length || !data.date || !data.valid_until) return null;
 
     const clean = (t: string) =>
       t
@@ -270,7 +280,12 @@ export class ImdAgrometService {
           shown.length && more > 0 ? ` and more` : ''
         }.`
       : '';
-    const body = [outlook ? `Weather: ${text(outlook)}` : '', topicsLine]
+    const validityLine = `(Source: IMD Agromet · Issued ${displayDate(data.date)} · Valid until ${displayDate(data.valid_until)}, 11:59 PM)`;
+    const body = [
+      outlook ? `Weather: ${text(outlook)}` : '',
+      topicsLine,
+      validityLine,
+    ]
       .filter(Boolean)
       .join('\n\n');
 
@@ -279,8 +294,6 @@ export class ImdAgrometService {
         .map((d) => d.name)
         .filter(Boolean)
         .join(', ') || null;
-    const validTo = new Date(`${data.date}T00:00:00Z`);
-    validTo.setUTCDate(validTo.getUTCDate() + BULLETIN_VALID_DAYS);
 
     return {
       notification_id: stableUuid(
@@ -291,7 +304,7 @@ export class ImdAgrometService {
       category_type: outlook ? 'weather' : 'advisory',
       priority: Priority.HIGH,
       valid_from: data.date,
-      valid_to: validTo.toISOString().slice(0, 10),
+      valid_to: data.valid_until,
       created_at: `${data.date}T00:00:00.000Z`,
       content: {
         title: `IMD Agromet Advisory${district ? ` · ${district}` : ''} (${data.date})`,
@@ -301,13 +314,13 @@ export class ImdAgrometService {
       metadata: {
         source: 'IMD',
         bulletin_date: data.date,
+        valid_until: data.valid_until,
         lgd_district_codes: data.districts.map((d) => d.lgd_district_code),
         district_name: district,
         has_weather_outlook: !!outlook,
         crops,
         other_advisories: unnamed,
-        follow_up_prompt:
-          'Tell me the IMD agro advisory for my crop and other advisories for my district.',
+        follow_up_prompt: 'Tell me the IMD agro advisory for my crop.',
       },
     };
   }
