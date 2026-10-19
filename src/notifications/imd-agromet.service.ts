@@ -32,10 +32,6 @@ interface LookupResponse {
   advisories: LookupRow[];
 }
 
-// A weather outlook row: no crop, forecast wording, and about rain/temperature (IMD has no weather flag).
-const OUTLOOK_RE =
-  /\b(ERFS|extended range|forecast|may remain|is likely|are likely|expected to)\b/i;
-const WEATHER_RE = /\b(rain|rainfall|temperature)/i;
 const MAX_TOPICS = 6;
 const POINT_RADIUS_KM = 0.1;
 const POINT_CACHE_MS = 30 * 24 * 3600 * 1000;
@@ -151,14 +147,13 @@ export class ImdAgrometService {
   async getNotifications(
     lat: number,
     lon: number,
-    lang: string,
   ): Promise<NotificationItem[]> {
     if (!this.enabled || !this.configured) return [];
     try {
       const keys = await this.locationKeys(lat, lon);
       if (!keys?.length) return [];
       const data = await this.lookup(keys);
-      const item = this.toItem(data, lang);
+      const item = this.toItem(data);
       return item ? [item] : [];
     } catch (err) {
       this.logger.warn(
@@ -245,49 +240,21 @@ export class ImdAgrometService {
     return result.keys;
   }
 
-  private toItem(data: LookupResponse, lang: string): NotificationItem | null {
+  private toItem(data: LookupResponse): NotificationItem | null {
     const rows = data.advisories ?? [];
     if (!rows.length || !data.date || !data.valid_until) return null;
 
-    const clean = (t: string) =>
-      t
-        .replace(/[\uf0d8\u2022\t]+/g, ' ')
-        .replace(/\s*\r?\n\s*/g, ' ')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
-    const useRegional = lang.toLowerCase() !== 'en';
-    const text = (r: LookupRow) => {
-      const reg = (r.advisory_reg ?? '').trim();
-      return clean(useRegional && reg ? reg : (r.advisory_eng ?? ''));
-    };
-
-    const outlook = rows.find(
-      (r) =>
-        !r.crop &&
-        OUTLOOK_RE.test(r.advisory_eng ?? '') &&
-        WEATHER_RE.test(r.advisory_eng ?? ''),
-    );
-    const others = rows.filter((r) => r !== outlook);
     const crops = [
-      ...new Set(others.map((r) => r.crop).filter((c): c is string => !!c)),
+      ...new Set(rows.map((r) => r.crop).filter((c): c is string => !!c)),
     ];
-    const unnamed = others.filter((r) => !r.crop).length;
-
+    const unnamed = rows.filter((r) => !r.crop).length;
     const shown = crops.slice(0, MAX_TOPICS);
     const more = crops.length - shown.length + (unnamed ? 1 : 0);
-    const topicsLine = others.length
-      ? `Advisories available for: ${shown.length ? shown.join(', ') : 'your crops and livestock'}${
-          shown.length && more > 0 ? ` and more` : ''
-        }.`
-      : '';
+    const cropsLine = shown.length
+      ? `Crop advisories available for: ${shown.join(', ')}${more > 0 ? ' and more' : ''}.`
+      : 'Crop advisories are available for your district.';
     const validityLine = `(Source: IMD Agromet · Issued ${displayDate(data.date)} · Valid until ${displayDate(data.valid_until)}, 11:59 PM)`;
-    const body = [
-      outlook ? `Weather: ${text(outlook)}` : '',
-      topicsLine,
-      validityLine,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    const body = `${cropsLine}\n\n${validityLine}`;
 
     const district =
       data.districts
@@ -301,13 +268,13 @@ export class ImdAgrometService {
       ),
       type: NotificationType.AGROMET_ADVISORY,
       message_type: 'agromet',
-      category_type: outlook ? 'weather' : 'advisory',
+      category_type: 'advisory',
       priority: Priority.HIGH,
       valid_from: data.date,
       valid_to: data.valid_until,
       created_at: `${data.date}T00:00:00.000Z`,
       content: {
-        title: `IMD Agromet Advisory${district ? ` · ${district}` : ''} (${data.date})`,
+        title: `Agromet Advisory${district ? ` · ${district}` : ''}`,
         body,
       },
       location: null,
@@ -317,7 +284,6 @@ export class ImdAgrometService {
         valid_until: data.valid_until,
         lgd_district_codes: data.districts.map((d) => d.lgd_district_code),
         district_name: district,
-        has_weather_outlook: !!outlook,
         crops,
         other_advisories: unnamed,
         follow_up_prompt: 'Tell me the IMD agro advisory for my crop.',
