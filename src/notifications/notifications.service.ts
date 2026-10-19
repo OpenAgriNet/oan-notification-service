@@ -118,7 +118,7 @@ export class NotificationsService {
       const [subdistricts, genericRows, imdItems] = await Promise.all([
         this.findMatchingSubdistricts(dto.lon, dto.lat, radiusKm),
         this.fetchActiveGenericMessages(dto.lang),
-        this.imdAgromet.getNotifications(dto.lat, dto.lon, dto.lang), // never throws
+        this.imdAgromet.getNotifications(dto.lat, dto.lon), // never throws
       ]);
 
       let weatherRows: AdvisoryRow[] = [];
