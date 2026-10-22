@@ -32,7 +32,6 @@ interface LookupResponse {
   advisories: LookupRow[];
 }
 
-const MAX_TOPICS = 6;
 const POINT_RADIUS_KM = 0.1;
 const POINT_CACHE_MS = 30 * 24 * 3600 * 1000;
 const SIGNATURE_MAX_AGE_S = 300;
@@ -248,10 +247,8 @@ export class ImdAgrometService {
       ...new Set(rows.map((r) => r.crop).filter((c): c is string => !!c)),
     ];
     const unnamed = rows.filter((r) => !r.crop).length;
-    const shown = crops.slice(0, MAX_TOPICS);
-    const more = crops.length - shown.length + (unnamed ? 1 : 0);
-    const cropsLine = shown.length
-      ? `Crop advisories available for: ${shown.join(', ')}${more > 0 ? ' and more' : ''}.`
+    const cropsLine = crops.length
+      ? `Crop advisories available for: ${crops.join(', ')}.`
       : 'Crop advisories are available for your district.';
     const validityLine = `(Source: IMD Agromet · Issued ${displayDate(data.date)} · Valid until ${displayDate(data.valid_until)}, 11:59 PM)`;
     const body = `${cropsLine}\n\n${validityLine}`;
