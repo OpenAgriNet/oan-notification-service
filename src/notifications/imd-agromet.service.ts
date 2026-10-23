@@ -257,11 +257,13 @@ export class ImdAgrometService {
       if (!names.includes(r.crop)) names.push(r.crop);
       groups.set(category, names);
     }
-    const covered = [...groups]
-      .map(([category, names]) => `${category} (${names.sort((x, y) => x.localeCompare(y)).join(', ')})`)
-      .join(', ');
-    const cropsLine = covered
-      ? `Advisories available for ${covered}.`
+    // One paragraph per category: the app starts a new paragraph at each blank line.
+    const lines = [...groups].map(([category, names]) => {
+      names.sort((x, y) => x.localeCompare(y));
+      return names.length === 1 && names[0] === category ? category : `${category}: ${names.join(', ')}`;
+    });
+    const cropsLine = lines.length
+      ? ['Advisories available for:', ...lines].join('\n\n')
       : 'Advisories are available for your district.';
     const validityLine = `(Source: IMD Agromet · Issued ${displayDate(data.date)} · Valid until ${displayDate(data.valid_until)}, 11:59 PM)`;
     const body = `${cropsLine}\n\n${validityLine}`;
