@@ -21,6 +21,7 @@ interface LookupRow {
   custom_date: string;
   district_name: string | null;
   crop: string | null;
+  category: string | null;
   advisory_eng: string | null;
   advisory_reg: string | null;
 }
@@ -247,9 +248,21 @@ export class ImdAgrometService {
       ...new Set(rows.map((r) => r.crop).filter((c): c is string => !!c)),
     ];
     const unnamed = rows.filter((r) => !r.crop).length;
-    const cropsLine = crops.length
-      ? `Crop advisories available for: ${crops.join(', ')}.`
-      : 'Crop advisories are available for your district.';
+    // Group by IMD's own category names, as the chat does: "Crop (Mustard, Wheat), Live Stock (Cow)".
+    const groups = new Map<string, string[]>();
+    for (const r of rows) {
+      if (!r.crop) continue;
+      const category = r.category ?? 'Other';
+      const names = groups.get(category) ?? [];
+      if (!names.includes(r.crop)) names.push(r.crop);
+      groups.set(category, names);
+    }
+    const covered = [...groups]
+      .map(([category, names]) => `${category} (${names.sort((x, y) => x.localeCompare(y)).join(', ')})`)
+      .join(', ');
+    const cropsLine = covered
+      ? `Advisories available for ${covered}.`
+      : 'Advisories are available for your district.';
     const validityLine = `(Source: IMD Agromet · Issued ${displayDate(data.date)} · Valid until ${displayDate(data.valid_until)}, 11:59 PM)`;
     const body = `${cropsLine}\n\n${validityLine}`;
 
@@ -283,7 +296,7 @@ export class ImdAgrometService {
         district_name: district,
         crops,
         other_advisories: unnamed,
-        follow_up_prompt: 'Tell me the IMD agro advisory for my crop.',
+        follow_up_prompt: 'Yes, show me the advisory',
       },
     };
   }
